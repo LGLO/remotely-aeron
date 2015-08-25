@@ -12,10 +12,13 @@ object OriginalClient extends App{
 
   import remotely.codecs._
 
+  val serverAddress = if (args.length >= 1) args(0) else "127.0.0.1"
+  println(s"Will connect to $serverAddress")
+
   private val m: Monitoring = Monitoring.consoleLogger("Netty")
   val t0 = System.nanoTime()
   val transport: Task[NettyTransport] = NettyTransport.single(
-    new InetSocketAddress("localhost", 8822),
+    new InetSocketAddress(serverAddress, 8822),
     Test1Client.expectedSignatures, monitoring = m)
   private val nettyTransport = transport.run
   val endpoint:Endpoint = Endpoint.single(nettyTransport)

@@ -4,6 +4,7 @@ import java.net.InetSocketAddress
 import java.util.concurrent.{TimeUnit, CountDownLatch}
 
 import remotely.transport.aeron.AeronClient
+import remotely.transport.aeron.tests.ServerMain._
 import remotely.transport.aeron.tests.server.Test1Client
 import remotely.{Endpoint, Monitoring}
 import uk.co.real_logic.aeron.Aeron
@@ -15,6 +16,12 @@ import scalaz.concurrent.Task
 object ClientMain extends App {
 
   import remotely.codecs._
+
+  val serverAddress = if (args.length >= 1) args(0) else "127.0.0.1"
+  val bindAddress = if (args.length >= 2) args(1) else "127.0.0.1"
+
+  println(s"Server address: $serverAddress")
+  println(s"Bind address $bindAddress")
 
   private val m: Monitoring = Monitoring.consoleLogger("Client")
   //private val m: Monitoring = Monitoring.empty
@@ -56,8 +63,8 @@ object ClientMain extends App {
   aeron.close()
 
   def client(clientPort:Int):Task[AeronClient] = AeronClient.single(
-    new InetSocketAddress("localhost", serverPort),
-    new InetSocketAddress("localhost", clientPort),
+    new InetSocketAddress(serverAddress, serverPort),
+    new InetSocketAddress(bindAddress, clientPort),
     Test1Client.expectedSignatures,
     Option.empty,
     m,
