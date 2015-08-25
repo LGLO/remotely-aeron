@@ -1,4 +1,4 @@
-name := "aeron-tests"
+name := "remotely-aeron"
 
 version := "1.0"
 

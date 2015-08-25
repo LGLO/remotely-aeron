@@ -22,7 +22,8 @@ object OriginalClient extends App{
   val dtMs = (System.nanoTime()-t0)/1000000
   println(s"'connecting' took: $dtMs[ms]")
 
-  stringsTest(endpoint)
+  //stringsTest(endpoint)
+  pingTest(endpoint)
 
   nettyTransport.shutdown.run
   System.exit(0)

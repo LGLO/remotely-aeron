@@ -19,7 +19,8 @@ object Test1Protocol {
     .specify1("idInt", Field.strict[Int]("a"), Type[Int])
     .specify1("idLong", Field.strict[Long]("a"), Type[Long])
     .specify1("idString", Field.strict[String]("a"), Type[String])
-    .specify2("addInt", Field.strict[Int]("a"), Field.strict[Int]("b"), Type[Int])
+    //awaiting fix in remotely Signatures.scala
+    //.specify2("addInt", Field.strict[Int]("a"), Field.strict[Int]("b"), Type[Int])
 
 }
 
