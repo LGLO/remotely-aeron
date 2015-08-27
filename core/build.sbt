@@ -20,3 +20,5 @@ libraryDependencies ++= {
     "org.scalaz.stream"  %% "scalaz-stream" % "0.7.2a"
   )
 }
+
+testSettings

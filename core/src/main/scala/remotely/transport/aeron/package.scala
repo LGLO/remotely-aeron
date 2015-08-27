@@ -21,10 +21,9 @@ import java.net.{URI, InetSocketAddress}
 import java.util.concurrent.{TimeUnit, ExecutorService}
 
 import scodec.bits.BitVector
-import uk.co.real_logic.aeron.logbuffer.{FragmentHandler, Header}
 import uk.co.real_logic.aeron._
 import uk.co.real_logic.agrona.DirectBuffer
-import uk.co.real_logic.agrona.concurrent.{BusySpinIdleStrategy, BackoffIdleStrategy, UnsafeBuffer}
+import uk.co.real_logic.agrona.concurrent.{NoOpIdleStrategy, BusySpinIdleStrategy, BackoffIdleStrategy, UnsafeBuffer}
 
 import scalaz.{-\/, \/-, \/}
 import scalaz.concurrent.Task
@@ -48,14 +47,13 @@ package object aeron {
     new InetSocketAddress(uri.getHost, uri.getPort)
   }
 
-  val backoffStrategy = new BackoffIdleStrategy(
+  def backoffStrategy() = new BackoffIdleStrategy(
     100, 10,
     TimeUnit.MICROSECONDS.toNanos(1),
     TimeUnit.MICROSECONDS.toNanos(100)
   )
 
-  val busySpinStrategy = new BusySpinIdleStrategy()
-  //val oneMsTimer = Timer(1, "Retry timer")
+  val noOpStrategy = new NoOpIdleStrategy()
 
   def retry[A](task: Task[A], retries: Int = 50, backOff: Long = 10)(es:ExecutorService): Task[A] = {
 
@@ -82,7 +80,7 @@ package object aeron {
       }
     }
 
-    go(0)
+    Task.suspend(go(0))
   }
 
 
@@ -94,10 +92,10 @@ package object aeron {
       case _ => s"code = $code"
     }
 
-    def offerOnce: Task[Unit] = Task.delay{
+    def offerOnce: Task[Unit] = Task.suspend{
       val errCode: Long = pub.offer(buf, 0, buf.capacity())
-      if (errCode >= 0) ()
-      else throw new scala.RuntimeException(s"$respName not sent: ${message(errCode)}")
+      if (errCode >= 0) Task.now(())
+      else Task.fail(new scala.RuntimeException(s"$respName not sent: ${message(errCode)}"))
     }
 
     retry(offerOnce, 100, 10)(es)

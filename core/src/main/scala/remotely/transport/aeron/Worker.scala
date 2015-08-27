@@ -141,14 +141,12 @@ class Worker(val q: Queue[WorkerEvent],
   }
 
   def pollWhileRunning(running: AtomicBoolean, s: Subscription, h: FragmentHandler)
-                      (es: ExecutorService): Task[Unit] =
+                      (es: ExecutorService): Task[Unit] = Task.fork {
     if (running.get) {
       try {
         val fragmentsRead = s.poll(h, 1)
-        busySpinStrategy.idle(fragmentsRead)
-        Task.fork {
-          pollWhileRunning(running, s, h)(es)
-        }
+        noOpStrategy.idle(fragmentsRead)
+        pollWhileRunning(running, s, h)(es)
       } catch {
         case e: IllegalStateException =>
           logger.negotiating(Some(address), s"Stream ${s.streamId()} reader stopped abnormally", Some(e))
@@ -156,5 +154,8 @@ class Worker(val q: Queue[WorkerEvent],
       }
     } else {
       logger.negotiating(Some(address), s"Stream ${s.streamId()} reader stopped", None)
-      Task.now(())}
+      Task.now(())
+    }
+  }(es)
+
 }

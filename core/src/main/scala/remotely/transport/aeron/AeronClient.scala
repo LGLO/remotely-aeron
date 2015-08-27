@@ -29,7 +29,7 @@ import scodec.bits.BitVector
 import uk.co.real_logic.aeron.{Publication, Subscription, Aeron, FragmentAssembler}
 import uk.co.real_logic.aeron.logbuffer.{Header, FragmentHandler}
 import uk.co.real_logic.agrona.DirectBuffer
-import uk.co.real_logic.agrona.concurrent.UnsafeBuffer
+import uk.co.real_logic.agrona.concurrent.{NoOpIdleStrategy, UnsafeBuffer}
 
 
 import scalaz.concurrent.{Strategy, Task}
@@ -142,24 +142,26 @@ object AeronClient {
     def receiveStreamId(s: Subscription): Task[StreamId] = {
       Task.async(cb => {
         val running = new AtomicBoolean(true)
+        val strategy = new NoOpIdleStrategy()
         val h = new FragmentAssembler(
           new StreamIdResponseHandler(running, cb, log), 1024)
         while (running.get) {
           val fragmentsRead = s.poll(h, 1)
-          busySpinStrategy.idle(fragmentsRead)
+          strategy.idle(fragmentsRead)
         }
       })
     }
 
     def receiveCapabilities(s: Subscription): Task[Capabilities] = {
       val running = new AtomicBoolean(true)
+      val strategy = new NoOpIdleStrategy()
       Task.async[Capabilities] { cb =>
         log("Receiving capabilities...", None)
         val h = new CapabilitiesResponseHandler(running, cb, log)
         val clientCapabilitiesHandler = new FragmentAssembler(h, 1024)
         while (running.get) {
           val fragmentsRead = s.poll(clientCapabilitiesHandler, 1)
-          busySpinStrategy.idle(fragmentsRead)
+          strategy.idle(fragmentsRead)
         }
         log("Receive capabilities END.", None)
       }
@@ -168,12 +170,13 @@ object AeronClient {
     def receiveDescribeResponse(respSubs: Subscription, expected: Set[Signature]): Task[Unit] = {
       log("Awaiting 'describe' response", None)
       val running = new AtomicBoolean(true)
+      val strategy = new NoOpIdleStrategy()
       Task.async[Set[Signature]] { cb =>
         val h = new DescribeResponseHandler(running, cb, log)
         val clientCapabilitiesHandler = new FragmentAssembler(h, 1024)
         while (running.get) {
           val fragmentsRead = respSubs.poll(clientCapabilitiesHandler, 1)
-          busySpinStrategy.idle(fragmentsRead)
+          strategy.idle(fragmentsRead)
         }
       }.map(s => {
         log(s"Received 'describe' response: $s", None)

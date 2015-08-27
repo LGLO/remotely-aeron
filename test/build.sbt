@@ -2,6 +2,7 @@ import common._
 
 macrosSettings
 
+name := "remotely-aeron-test"
 
 scalacOptions ++= Seq(
   "-Ywarn-value-discard",
