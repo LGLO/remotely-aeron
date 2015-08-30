@@ -4,7 +4,7 @@ import sbtassembly.AssemblyPlugin.autoImport._
 
 object common {
 
-  val aeronVersion = "0.1.3-SNAPSHOT"
+  val aeronVersion = "0.1.3"
 
   val remotelyVersion = "1.4.2-SNAPSHOT"
 

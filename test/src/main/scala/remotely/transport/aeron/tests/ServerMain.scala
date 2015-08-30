@@ -17,7 +17,8 @@ object ServerMain extends App {
     1,
     Capabilities(Capabilities.required),
     //Monitoring.consoleLogger("Server")
-    Monitoring.empty
+    Monitoring.empty,
+    remotely.transport.aeron.backoffStrategy()
   )
 
   val stop = start.run

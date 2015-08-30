@@ -21,7 +21,6 @@ import java.net.SocketAddress
 
 import remotely.Monitoring
 
-/** TODO: go back to original Monitoring only */
 class NegotiatingLogger(val m: Monitoring, val addr: Option[SocketAddress]) {
   def negotiating(what: String, error: Option[Throwable] = None): Unit = {
     m.negotiating(addr, what, error)

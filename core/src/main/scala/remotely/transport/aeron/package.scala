@@ -23,7 +23,7 @@ import java.util.concurrent.{TimeUnit, ExecutorService}
 import scodec.bits.BitVector
 import uk.co.real_logic.aeron._
 import uk.co.real_logic.agrona.DirectBuffer
-import uk.co.real_logic.agrona.concurrent.{NoOpIdleStrategy, BusySpinIdleStrategy, BackoffIdleStrategy, UnsafeBuffer}
+import uk.co.real_logic.agrona.concurrent.{NoOpIdleStrategy, BackoffIdleStrategy, UnsafeBuffer}
 
 import scalaz.{-\/, \/-, \/}
 import scalaz.concurrent.Task
@@ -116,15 +116,15 @@ package object aeron {
     new String(data)
   }
 
-  implicit def funToNewImageHandler(f: (Image, Subscription, Long, String) => Unit): NewImageHandler =
-    new NewImageHandler {
-      override def onNewImage(image: Image, s: Subscription, joiningPosition: Long, sourceIdentity: String): Unit =
+  implicit def funToNewImageHandler(f: (Image, Subscription, Long, String) => Unit): AvailableImageHandler =
+    new AvailableImageHandler {
+      override def onAvailableImage(image: Image, s: Subscription, joiningPosition: Long, sourceIdentity: String): Unit =
         f(image, s, joiningPosition, sourceIdentity)
     }
 
-  implicit def funToInactiveImageHandler(f: (Image, Subscription, Long) => Unit): InactiveImageHandler =
-    new InactiveImageHandler {
-      override def onInactiveImage(image: Image, s: Subscription, position: Long): Unit =
+  implicit def funToInactiveImageHandler(f: (Image, Subscription, Long) => Unit): UnavailableImageHandler =
+    new UnavailableImageHandler {
+      override def onUnavailableImage(image: Image, s: Subscription, position: Long): Unit =
         f(image, s, position)
     }
 

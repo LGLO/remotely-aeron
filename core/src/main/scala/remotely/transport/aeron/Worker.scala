@@ -24,6 +24,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import remotely.{Handler, Monitoring}
 import uk.co.real_logic.aeron.logbuffer.FragmentHandler
 import uk.co.real_logic.aeron.{Aeron, Subscription, FragmentAssembler, Publication}
+import uk.co.real_logic.agrona.concurrent.IdleStrategy
 
 import scala.concurrent.duration.Duration
 import scalaz.{\/-, -\/}
@@ -88,6 +89,7 @@ object Worker{
 class Worker(val q: Queue[WorkerEvent],
              val acceptorQ: Queue[AcceptorEvent],
              val es: ExecutorService,
+             val strategy: IdleStrategy,
              val handler: Handler,
              val logger: Monitoring,
              val aeron: Aeron,
@@ -128,7 +130,7 @@ class Worker(val q: Queue[WorkerEvent],
       val rh = new RequestsHandler(handler, p, running, logger, q, es)
       val h = new FragmentAssembler(rh)
       logger.negotiating(None, s"Awaiting requests ", None)
-      pollWhileRunning(running, subs, h)(es)
+      pollWhileRunning(running, subs, h)
     }(es).runAsync {
       case -\/(t) =>
         logger.negotiating(None, s"Run requests subscription:$stream: $t", Some(t))
@@ -140,13 +142,14 @@ class Worker(val q: Queue[WorkerEvent],
     StreamState(running, System.currentTimeMillis())
   }
 
-  def pollWhileRunning(running: AtomicBoolean, s: Subscription, h: FragmentHandler)
-                      (es: ExecutorService): Task[Unit] = Task.fork {
+  def pollWhileRunning(running: AtomicBoolean, s: Subscription, h: FragmentHandler): Task[Unit] =
     if (running.get) {
       try {
         val fragmentsRead = s.poll(h, 1)
-        noOpStrategy.idle(fragmentsRead)
-        pollWhileRunning(running, s, h)(es)
+        strategy.idle(fragmentsRead)
+        Task.fork {
+          pollWhileRunning(running, s, h)
+        }(es)
       } catch {
         case e: IllegalStateException =>
           logger.negotiating(Some(address), s"Stream ${s.streamId()} reader stopped abnormally", Some(e))
@@ -156,6 +159,5 @@ class Worker(val q: Queue[WorkerEvent],
       logger.negotiating(Some(address), s"Stream ${s.streamId()} reader stopped", None)
       Task.now(())
     }
-  }(es)
 
 }

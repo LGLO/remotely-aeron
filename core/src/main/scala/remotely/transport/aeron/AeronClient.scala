@@ -19,7 +19,7 @@ package remotely.transport.aeron
 
 import java.net.InetSocketAddress
 import java.util.concurrent.{Executors, ExecutorService}
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.{AtomicReference, AtomicBoolean}
 
 import remotely.Response.{Context => RemotelyContext}
 import remotely._
@@ -29,7 +29,7 @@ import scodec.bits.BitVector
 import uk.co.real_logic.aeron.{Publication, Subscription, Aeron, FragmentAssembler}
 import uk.co.real_logic.aeron.logbuffer.{Header, FragmentHandler}
 import uk.co.real_logic.agrona.DirectBuffer
-import uk.co.real_logic.agrona.concurrent.{NoOpIdleStrategy, UnsafeBuffer}
+import uk.co.real_logic.agrona.concurrent.{IdleStrategy, NoOpIdleStrategy, UnsafeBuffer}
 
 
 import scalaz.concurrent.{Strategy, Task}
@@ -39,9 +39,11 @@ import scalaz.{-\/, \/-}
 class AeronClient(val aeron: Aeron,
                   val publication: Publication,
                   val subs: Subscription,
-                  val log: Monitoring) extends Handler {
+                  val log: Monitoring,
+                  val strategy: IdleStrategy) extends Handler {
 
   val running: AtomicBoolean = new AtomicBoolean(true)
+  val bits: AtomicReference[Option[BitVector]] = new AtomicReference(Option.empty[BitVector])
   val serverChannel = publication.channel()
   val offerEs = Executors.newSingleThreadExecutor(Strategy.DefaultDaemonThreadFactory)
 
@@ -67,11 +69,10 @@ class AeronClient(val aeron: Aeron,
   def readNextFrame: Process[Task, BitVector] = {
     val t0 = System.currentTimeMillis()
     running.set(true)
-    var ret: Option[BitVector] = None
     val h = new FragmentAssembler(
       new FragmentHandler {
         override def onFragment(buffer: DirectBuffer, offset: Int, length: Int, header: Header): Unit = {
-          ret = Some(fromDirectBuffer(buffer, offset, length))
+          bits.set(Some(fromDirectBuffer(buffer, offset, length)))
           running.set(false)
         }
       })
@@ -79,13 +80,12 @@ class AeronClient(val aeron: Aeron,
     while (running.get() && (System.currentTimeMillis() - t0) < 30000) {
       //TODO - don't hardcode
       val fragmentsRead = subs.poll(h, 10)
-      backoffStrategy.idle(fragmentsRead)
+      strategy.idle(fragmentsRead)
     }
-    if (ret.isDefined) {
-      Process.emit(ret.get)
-    } else {
-      Process.fail(new RuntimeException("Could not read response"))
-    }
+
+    bits.get().map(Process.emit)
+      .getOrElse(Process.fail(new RuntimeException("Could not read response")))
+
   }
 
   def write(pub: Publication)(buf: DirectBuffer): Task[Unit] =
@@ -116,6 +116,7 @@ object AeronClient {
                 val expectedSigs: Set[Signature] = Set.empty,
                 val aeron: Aeron,
                 val es: ExecutorService,
+                val strategy: IdleStrategy,
                 val logger: Monitoring) {
 
     val server: Channel = channel(serverAddr)
@@ -133,7 +134,7 @@ object AeronClient {
         pub <- Task(aeron.addPublication(server, streamId))
         _ <- sendDescribeRequest(pub, streamId)
         _ <- receiveDescribeResponse(subscription, expectedSigs)
-      } yield new AeronClient(aeron, pub, subscription, logger)
+      } yield new AeronClient(aeron, pub, subscription, logger, strategy)
       connect.onFinish(_ => Task.now(es.shutdown()))
     }
 
@@ -142,7 +143,6 @@ object AeronClient {
     def receiveStreamId(s: Subscription): Task[StreamId] = {
       Task.async(cb => {
         val running = new AtomicBoolean(true)
-        val strategy = new NoOpIdleStrategy()
         val h = new FragmentAssembler(
           new StreamIdResponseHandler(running, cb, log), 1024)
         while (running.get) {
@@ -170,7 +170,6 @@ object AeronClient {
     def receiveDescribeResponse(respSubs: Subscription, expected: Set[Signature]): Task[Unit] = {
       log("Awaiting 'describe' response", None)
       val running = new AtomicBoolean(true)
-      val strategy = new NoOpIdleStrategy()
       Task.async[Set[Signature]] { cb =>
         val h = new DescribeResponseHandler(running, cb, log)
         val clientCapabilitiesHandler = new FragmentAssembler(h, 1024)
@@ -232,11 +231,12 @@ object AeronClient {
              expectedSigs: Set[Signature] = Set.empty,
              workerThreads: Option[Int] = None,
              M: Monitoring = Monitoring.empty,
-             aeron: Aeron): Task[AeronClient] = {
+             aeron: Aeron,
+             strategy: IdleStrategy): Task[AeronClient] = {
 
     //Dunno why single thread was deadlocking sometimes
     val es = Executors.newFixedThreadPool(2, Strategy.DefaultDaemonThreadFactory)
-    new Starter(serverAddr, clientAddr, expectedSigs, aeron, es, M).go()
+    new Starter(serverAddr, clientAddr, expectedSigs, aeron, es, strategy, M).go()
   }
 
 }

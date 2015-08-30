@@ -26,7 +26,7 @@ import uk.co.real_logic.aeron.Aeron.Context
 import uk.co.real_logic.aeron._
 import uk.co.real_logic.aeron.logbuffer.{Header, FragmentHandler}
 import uk.co.real_logic.agrona.DirectBuffer
-import uk.co.real_logic.agrona.concurrent.UnsafeBuffer
+import uk.co.real_logic.agrona.concurrent.{IdleStrategy, UnsafeBuffer}
 
 import scalaz.stream.{Process, async}
 import scalaz.stream.async.mutable.Queue
@@ -48,7 +48,8 @@ object AeronServer {
                 acceptorQ: Queue[AcceptorEvent],
                 states: AcceptorState,
                 running: AtomicBoolean,
-                es:ExecutorService) {
+                es:ExecutorService,
+                strategy: IdleStrategy) {
 
     def go(): Unit = {
       startWorkers()
@@ -71,7 +72,7 @@ object AeronServer {
         try {
           while (running.get) {
             val fragmentsRead = subs.poll(fragmentsAssembler, 10)
-            backoffStrategy.idle(fragmentsRead)
+            strategy.idle(fragmentsRead)
           }
         } finally {
           close(subs)
@@ -96,7 +97,7 @@ object AeronServer {
       states.workerQueues foreach startWorker.tupled
 
     val startWorker = (id: WorkerId, q: Queue[WorkerEvent]) => {
-      val w = new Worker(q, acceptorQ, es, handler, logger, aeron, address)
+      val w = new Worker(q, acceptorQ, es, strategy, handler, logger, aeron, address)
       w.process.run.runAsync({
         case \/-(_) => logger.negotiating(Some(address), s"Worker $id stopped", None)
         case -\/(err) => logger.negotiating(Some(address), s"Worker $id stopped abnormally", Some(err))
@@ -110,7 +111,8 @@ object AeronServer {
             workers: Int = 1,
             streamsPerWorker: Int = 1,
             capabilities: Capabilities = Capabilities.default,
-            logger: Monitoring = Monitoring.empty): Task[Task[Unit]] = {
+            logger: Monitoring = Monitoring.empty,
+            strategy: IdleStrategy): Task[Task[Unit]] = {
 
     val handler = EnvironmentUtil.serverHandler(env, logger)
     //3 threads: Acceptor process, connectStreamReader, connect responses sender
@@ -121,7 +123,7 @@ object AeronServer {
       val acceptorQ: Queue[AcceptorEvent] = async.unboundedQueue[AcceptorEvent]
       val aeron = connectToAeron(acceptorQ, address, logger)
       val states = initialState(workers, streamsPerWorker)
-      new Starter(aeron, address, handler, capabilities, logger, acceptorQ, states, running, es).go()
+      new Starter(aeron, address, handler, capabilities, logger, acceptorQ, states, running, es, strategy).go()
       Task {
         logger.negotiating(Some(address), "Stopping...", None)
         running.set(false)
@@ -135,8 +137,8 @@ object AeronServer {
   def connectToAeron(acceptorQ: Queue[AcceptorEvent], addr: InetSocketAddress, logger: Monitoring): Aeron = {
     logger.negotiating(Some(addr), "Connecting to Aeron media driver", None)
     val ctx = new Context()
-      .inactiveImageHandler(onInactiveImage(logger))
-      .newImageHandler(onNewImage(logger))
+      .unavailableImageHandler(onUnavailableImage(logger))
+      .availableImageHandler(onAvailableImage(logger))
       .driverTimeoutMs(10000)
     val aeron = Aeron.connect(ctx)
     logger.negotiating(Some(addr), "Connected to Aeron media driver", None)
@@ -165,11 +167,11 @@ object AeronServer {
     }
   }
 
-  def onInactiveImage(M: Monitoring): InactiveImageHandler =
+  def onUnavailableImage(M: Monitoring): UnavailableImageHandler =
     (i: Image, s: Subscription, position: Long) =>
       M.negotiating(None, s"Inactive image = $i, subscription = $s at position = $position", None)
 
-  def onNewImage(M: Monitoring): NewImageHandler =
+  def onAvailableImage(M: Monitoring): AvailableImageHandler =
     (i: Image, s: Subscription, joiningPos: Long, source: String) =>
       M.negotiating(None, s"New image $i, subscription = $s at position=$joiningPos from $source", None)
 
@@ -220,9 +222,7 @@ class RequestsHandler(val handler: Handler,
     val bv = fromDirectBuffer(b, offset, length)
     val outP = handler(Process.emit(bv))
     val write: Task[Unit] = outP.evalMap { b =>
-      Task.suspend {
         offerResponse(pub, toDirectBuffer(b), "Response")(es)
-      }
     }.run
 
     write.runAsync {

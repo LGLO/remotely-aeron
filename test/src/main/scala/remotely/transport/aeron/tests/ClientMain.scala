@@ -1,4 +1,5 @@
-package remotely.transport.aeron.tests
+package remotely.transport.aeron
+package tests
 
 import java.net.InetSocketAddress
 import java.util.concurrent.{TimeUnit, CountDownLatch}
@@ -68,6 +69,7 @@ object ClientMain extends App {
     Test1Client.expectedSignatures,
     Option.empty,
     m,
-    aeron)
+    aeron,
+    backoffStrategy())
 
 }
