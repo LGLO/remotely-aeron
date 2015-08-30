@@ -1,5 +1,7 @@
 import common._
 
+name := "remotely-aeron-core"
+
 scalacOptions ++= Seq(
   "-Ywarn-value-discard",
   "-Xlint",
@@ -22,3 +24,5 @@ libraryDependencies ++= {
 }
 
 testSettings
+
+assemblySettings

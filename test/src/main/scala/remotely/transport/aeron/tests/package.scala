@@ -27,7 +27,7 @@ package object tests {
   def pingTest(endpoint: Endpoint): Unit = {
     val t = runIdLongRequests(endpoint)
     //(1 to 100).foreach(_=>t.runAsync(_=>()))
-    val times: List[Long] = (1 to 1000).map(_ => t.run).foldLeft(List.empty[Long])((ts, t) => t :: ts)
+    val times: List[Long] = (1 to 10000).map(_ => t.run).foldLeft(List.empty[Long])((ts, t) => t :: ts)
     val sorted = times.sorted
     times foreach println
     println("min: " + sorted.head)

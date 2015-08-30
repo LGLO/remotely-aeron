@@ -1,5 +1,6 @@
 import sbt.Keys._
 import sbt._
+import sbtassembly.AssemblyPlugin.autoImport._
 
 object common {
 
@@ -29,6 +30,15 @@ object common {
       "org.scalatest"  %% "scalatest"  % scalaTestVersion.value  % "test",
       "org.scalacheck" %% "scalacheck" % scalaCheckVersion.value % "test"
     )
+  )
+
+  def assemblySettings = Seq(
+    assemblyMergeStrategy in assembly := {
+      case "META-INF/io.netty.versions.properties" => MergeStrategy.first
+      case x =>
+        val oldStrategy = (assemblyMergeStrategy in assembly).value
+        oldStrategy(x)
+    }
   )
 
 }

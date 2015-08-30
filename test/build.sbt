@@ -21,3 +21,5 @@ libraryDependencies ++= {
     "org.hdrhistogram" % "HdrHistogram" % "2.1.6"
   )
 }
+
+assemblySettings
