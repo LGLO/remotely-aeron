@@ -4,9 +4,9 @@ import sbtassembly.AssemblyPlugin.autoImport._
 
 object common {
 
-  val aeronVersion = "0.1.3"
+  val aeronVersion = "0.1.5"
 
-  val remotelyVersion = "1.4.2-SNAPSHOT"
+  val remotelyVersion = "1.4.2"
 
   def macrosSettings = Seq(
     addCompilerPlugin("org.scalamacros" % "paradise" % "2.1.0-M5" cross CrossVersion.full),
