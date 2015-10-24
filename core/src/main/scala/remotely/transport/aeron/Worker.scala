@@ -27,7 +27,7 @@ import uk.co.real_logic.aeron.{Aeron, Subscription, FragmentAssembler, Publicati
 import uk.co.real_logic.agrona.concurrent.IdleStrategy
 
 import scala.concurrent.duration.Duration
-import scalaz.{\/-, -\/}
+import scalaz.{\/, \/-, -\/}
 import scalaz.concurrent.{Strategy, Task}
 
 import scalaz.stream.async.mutable.Queue
@@ -41,6 +41,8 @@ case class Close(s: StreamId) extends WorkerEvent
 
 case object CheckTimeouts extends WorkerEvent
 
+case class PollingFinished(s: StreamId, result: \/[Throwable, Unit]) extends WorkerEvent
+
 case class UpdateTs(s:StreamId, ts:Timestamp) extends WorkerEvent
 
 
@@ -48,7 +50,7 @@ case class StreamState(running: AtomicBoolean, lastHbTs: Timestamp){
 
   def stop(): Unit = running.set(false)
 
-  def isTimedOut(current: Timestamp) = current - lastHbTs > 5000 //TODO: don't hardcode
+  def isTimedOut(current: Timestamp) = current - lastHbTs > 30000 //TODO: don't hardcode
 
   def updateHbTs(ts: Timestamp) = copy(lastHbTs = ts)
 }
@@ -57,6 +59,10 @@ case class WorkerState(m: Map[StreamId, StreamState]) {
 
   def stop(s: StreamId): WorkerState = {
     m.get(s).foreach(_.stop()) //I don't update current state because I never read 'running'. Maybe some other primitive should be used.
+    remove(s)
+  }
+
+  def remove(s: StreamId): WorkerState = {
     WorkerState(m - s)
   }
 
@@ -97,11 +103,11 @@ class Worker(val q: Queue[WorkerEvent],
 
   val srvChn: Channel = channel(address)
 
-  val w = wye.dynamic( (_:Any) => wye.Request.R, (_:Any) => wye.Request.L)
+  val w = wye.dynamic((_: Any) => wye.Request.R, (_: Any) => wye.Request.L)
 
   implicit val ses1: ScheduledExecutorService = Worker.ses
 
-  val checkTimeouts: Process[Task, WorkerEvent] = time.awakeEvery(Duration("1 second")).map(_=>CheckTimeouts)
+  val checkTimeouts: Process[Task, WorkerEvent] = time.awakeEvery(Duration("1 second")).map(_ => CheckTimeouts)
 
   val events: Process[Task, WorkerEvent] = q.dequeue.wye(checkTimeouts)(wye.merge)
 
@@ -116,6 +122,10 @@ class Worker(val q: Queue[WorkerEvent],
         s.stop(stream)
       case CheckTimeouts =>
         s.checkTimeouts
+      case PollingFinished(stream, result) =>
+        acceptorQ.enqueueOne(Closed(stream)).run
+        logStreamPollingFinished(stream, result)
+        s.remove(stream)
       case UpdateTs(stream, ts) =>
         s.updateHbTs(stream, ts)
     }
@@ -131,33 +141,36 @@ class Worker(val q: Queue[WorkerEvent],
       val h = new FragmentAssembler(rh)
       logger.negotiating(None, s"Awaiting requests ", None)
       pollWhileRunning(running, subs, h)
-    }(es).runAsync {
-      case -\/(t) =>
-        logger.negotiating(None, s"Run requests subscription:$stream: $t", Some(t))
-        acceptorQ.enqueueOne(Closed(stream)).run
-      case \/-(()) =>
-        logger.negotiating(None, s"Run requests subscription:$stream completed!", None)
-        acceptorQ.enqueueOne(Closed(stream)).run
-    }
+    }(es).runAsync(e => {
+      p.close()
+      q.enqueueOne(PollingFinished(stream, e)).run
+    })
     StreamState(running, System.currentTimeMillis())
   }
 
   def pollWhileRunning(running: AtomicBoolean, s: Subscription, h: FragmentHandler): Task[Unit] =
-    if (running.get) {
-      try {
-        val fragmentsRead = s.poll(h, 1)
-        strategy.idle(fragmentsRead)
-        Task.fork {
+    Task.fork {
+      if (running.get) {
+        try {
+          val fragmentsRead = s.poll(h, 1)
+          strategy.idle(fragmentsRead)
           pollWhileRunning(running, s, h)
-        }(es)
-      } catch {
-        case e: IllegalStateException =>
-          logger.negotiating(Some(address), s"Stream ${s.streamId()} reader stopped abnormally", Some(e))
-          Task.fail(e)
+        } catch {
+          case e: IllegalStateException =>
+            logger.negotiating(Some(address), s"Stream ${s.streamId()} reader stopped abnormally" , Some(e))
+            Task.fail(e)
+        }
+      } else {
+        logger.negotiating(Some(address), s"", None)
+        Task.now(())
       }
-    } else {
-      logger.negotiating(Some(address), s"Stream ${s.streamId()} reader stopped", None)
-      Task.now(())
-    }
+    }(es)
+
+  def logStreamPollingFinished(stream: StreamId, result: \/[Throwable, Unit]): Unit = result match {
+    case \/-(()) =>
+      logger.negotiating(None, s"Run requests subscription: '$stream' completed!", None)
+    case -\/(t) =>
+      logger.negotiating(None, s"Run requests subscription: '$stream' failed", Some(t))
+  }
 
 }

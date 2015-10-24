@@ -39,10 +39,11 @@ case class StreamRequest(channel: String) extends AcceptorEvent
  to avoid disconnection by client that has timed out earlier.*/
 case class Disconnect(stream: StreamId) extends AcceptorEvent
 
-case class AcceptorWorkerState(id: WorkerId, streams: Set[StreamId], queue: Queue[WorkerEvent]) {
-  def isAvailable(s: StreamId) = streams.contains(s)
+case class AcceptorWorkerState(id: WorkerId, free: Set[StreamId], taken: Set[StreamId], queue: Queue[WorkerEvent]) {
+  def isAvailable(s: StreamId) = free.contains(s)
+  def isTaken(s: StreamId) = taken.contains(s)
 
-  val freeStreams: Int = streams.size
+  val freeStreams: Int = free.size
 }
 
 class AcceptorState(m: Map[WorkerId, AcceptorWorkerState]) {
@@ -51,23 +52,20 @@ class AcceptorState(m: Map[WorkerId, AcceptorWorkerState]) {
 
   def mostOccupied: AcceptorWorkerState = m.values.toSeq.sortBy(_.freeStreams).head
 
-  def streamReleased(s: StreamId): AcceptorState = {
-    if (!m.values.exists(_.isAvailable(s))) {
-      val w = mostOccupied
-      val w2 = w.copy(streams = w.streams + s)
+  def streamReleased(s: StreamId): AcceptorState =
+    m.values.find(_.isTaken(s)).map { w =>
+      val w2 = w.copy(free = w.free + s, taken = w.taken - s)
       new AcceptorState(m.updated(w2.id, w2))
-    } else this
-
-  }
+    }.getOrElse(this)
 
   def streamTaken(w: AcceptorWorkerState, s: StreamId): AcceptorState = {
-    val w2 = w.copy(streams = w.streams - s)
+    val w2 = w.copy(free = w.free - s, taken = w.taken + s)
     new AcceptorState(m.updated(w2.id, w2))
   }
 
   def enqueueClose(s: StreamId): AcceptorState = {
     m.values
-      .find(_.streams.contains(s))
+      .find(_.taken.contains(s))
       .foreach(_.queue.enqueueOne(Close(s)).run)
     this
   }
@@ -89,7 +87,7 @@ class Acceptor(val aeron: Aeron,
         states.streamReleased(stream)
       case StreamRequest(channel) => //find worker with most free streams
         val ws = states.leastOccupied
-        val streamIds = ws.streams
+        val streamIds = ws.free
         if (streamIds.nonEmpty) {
           val streamId = streamIds.head
           replyAndNotifyWorker(channel, streamId, ws)

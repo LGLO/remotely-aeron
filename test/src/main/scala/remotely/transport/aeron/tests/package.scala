@@ -25,9 +25,9 @@ package object tests {
   }
 
   def pingTest(endpoint: Endpoint): Unit = {
-    val t = runIdLongRequests(endpoint)
+    val t = runIdLongRequests(endpoint)_
     //(1 to 100).foreach(_=>t.runAsync(_=>()))
-    val times: List[Long] = (1 to 10000).map(_ => t.run).foldLeft(List.empty[Long])((ts, t) => t :: ts)
+    val times: List[Long] = (1l to 1000l).map(x => t(x).run).foldLeft(List.empty[Long])((ts, t) => t :: ts)
     val sorted = times.sorted
     times foreach println
     println("min: " + sorted.head)
@@ -35,11 +35,13 @@ package object tests {
     println("avg:" + times.sum / times.length)
   }
 
-  def runIdLongRequests(endpoint:Endpoint): Task[Long] = {
+  def runIdLongRequests(endpoint:Endpoint)(x:Long): Task[Long] = {
     Task.delay[Remote[Long]] {
-      Test1Client.idLong(Remote.local(System.nanoTime()))
+      Test1Client.idLong(Remote.local(x))
     }.flatMap(_.runWithoutContext(endpoint))
-      .map(System.nanoTime() - _)
+      .map({
+      println(x)
+      System.nanoTime() - _})
       .map(_ / 1000)
   }
 

@@ -117,7 +117,7 @@ object AeronServer {
     val handler = EnvironmentUtil.serverHandler(env, logger)
     //3 threads: Acceptor process, connectStreamReader, connect responses sender
     //+ workers threads + one extra I cannot explain
-    val es = Executors.newFixedThreadPool(4 + workers, Strategy.DefaultDaemonThreadFactory)
+    val es = Executors.newFixedThreadPool(5 + workers, Strategy.DefaultDaemonThreadFactory)
     Task {
       val running = new AtomicBoolean(true)
       val acceptorQ: Queue[AcceptorEvent] = async.unboundedQueue[AcceptorEvent]
@@ -152,7 +152,7 @@ object AeronServer {
         val sw1 = firstStreamId + w * streamsPerWorker
         val swN = sw1 + streamsPerWorker
         val streams = (sw1 until swN).toSet
-        (w, AcceptorWorkerState(w, streams, async.unboundedQueue[WorkerEvent]))
+        (w, AcceptorWorkerState(w, streams, Set.empty, async.unboundedQueue[WorkerEvent]))
       })
 
     new AcceptorState(rss.toMap)

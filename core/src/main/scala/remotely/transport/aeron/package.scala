@@ -48,7 +48,7 @@ package object aeron {
   }
 
   def backoffStrategy() = new BackoffIdleStrategy(
-    100, 10,
+    10, 100,
     TimeUnit.MICROSECONDS.toNanos(1),
     TimeUnit.MICROSECONDS.toNanos(100)
   )

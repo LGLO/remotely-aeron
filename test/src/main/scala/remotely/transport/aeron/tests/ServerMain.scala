@@ -16,8 +16,8 @@ object ServerMain extends App {
     2,
     1,
     Capabilities(Capabilities.required),
-    //Monitoring.consoleLogger("Server")
-    Monitoring.empty,
+    Monitoring.consoleLogger("Server"),
+    //Monitoring.empty,
     remotely.transport.aeron.backoffStrategy()
   )
 

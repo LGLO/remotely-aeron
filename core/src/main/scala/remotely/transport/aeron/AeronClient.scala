@@ -46,7 +46,7 @@ class AeronClient(val aeron: Aeron,
   val bits: AtomicReference[Option[BitVector]] = new AtomicReference(Option.empty[BitVector])
   val serverChannel = publication.channel()
   val offerEs = Executors.newSingleThreadExecutor(Strategy.DefaultDaemonThreadFactory)
-
+  var i = 0
   def apply(toServer: Process[Task, BitVector]): Process[Task, BitVector] = {
     // read next byte vector from subscription to this queue
 
@@ -54,42 +54,56 @@ class AeronClient(val aeron: Aeron,
     val server = toServer.map(b => new UnsafeBuffer(b.toByteArray))
     Process.await(pubToUse) { pub =>
       val writeBytes: Task[Unit] = server.evalMap(write(pub)).run
-      val result: Process[Task, BitVector] = Process.await(writeBytes)(_ => readNextFrame).onHalt {
-        case Cause.End =>
-          //Stop reading from subscription
-          Process.Halt(Cause.End)
-        case cause =>
-          //Stop reading from subscription
-          Process.Halt(cause)
+      Process.await(writeBytes)(_ => readNextFrame)
+    }
+  }
+
+  val bitsSetter = new FragmentAssembler(
+    new FragmentHandler {
+      override def onFragment(buffer: DirectBuffer, offset: Int, length: Int, header: Header): Unit = {
+        bits.set(Some(fromDirectBuffer(buffer, offset, length)))
       }
-      result
-    }
-  }
+    })
 
+  def asyncHandler(cb:Callback[BitVector], stopper: () => Unit) = new FragmentAssembler(
+    new FragmentHandler {
+      override def onFragment(buffer: DirectBuffer, offset: Int, length: Int, header: Header): Unit = {
+        stopper()
+        cb(\/-(fromDirectBuffer(buffer, offset, length)))
+      }
+    })
+  
   def readNextFrame: Process[Task, BitVector] = {
-    val t0 = System.currentTimeMillis()
-    running.set(true)
-    val h = new FragmentAssembler(
-      new FragmentHandler {
-        override def onFragment(buffer: DirectBuffer, offset: Int, length: Int, header: Header): Unit = {
-          bits.set(Some(fromDirectBuffer(buffer, offset, length)))
-          running.set(false)
+    
+    Process.eval {
+      Task.async[BitVector] { cb =>
+        val running = new AtomicBoolean(true)
+        val h = asyncHandler(cb, () => running.set(false))
+        val t0 = System.currentTimeMillis()
+        try {
+          while (running.get()) {
+            //TODO - don't hardcode
+            val fragmentsRead = subs.poll(h, 10)
+            if(fragmentsRead!=0) println(s"fr=$fragmentsRead, ${System.currentTimeMillis()}")
+            if (running.get()) {
+              strategy.idle(fragmentsRead)
+            }
+            if ((System.currentTimeMillis() - t0) > 30000) {
+              throw new RuntimeException("Response timeout")
+            }
+          }
+        } catch {
+          case t: Throwable => throw new RuntimeException(t)
         }
-      })
-
-    while (running.get() && (System.currentTimeMillis() - t0) < 30000) {
-      //TODO - don't hardcode
-      val fragmentsRead = subs.poll(h, 10)
-      strategy.idle(fragmentsRead)
+      }
     }
-
-    bits.get().map(Process.emit)
-      .getOrElse(Process.fail(new RuntimeException("Could not read response")))
-
   }
 
-  def write(pub: Publication)(buf: DirectBuffer): Task[Unit] =
+
+
+  def write(pub: Publication)(buf: DirectBuffer): Task[Unit] = {
     offerResponse(pub, buf, "Request")(offerEs)
+  }
 
   def shutdown: Task[Unit] = Task {
     offerEs.shutdown()
